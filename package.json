@@ -1,0 +1,27 @@
+{
+  "name": "gen-ai-analytics-dashboard",
+  "version": "1.0.0",
+  "main": "index.js",
+  "scripts": {
+    "start": "react-scripts start",
+    "build": "react-scripts build",
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/KSAIMOUNIKA/gen-ai-analytics-dashboard.git"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "bugs": {
+    "url": "https://github.com/KSAIMOUNIKA/gen-ai-analytics-dashboard/issues"
+  },
+  "homepage": "https://github.com/KSAIMOUNIKA/gen-ai-analytics-dashboard#readme",
+  "description": "",
+  "dependencies": {
+    "nth-check": "^2.1.1",
+    "postcss": "^8.5.3",
+    "react-scripts": "^3.0.1"
+  }
+}
