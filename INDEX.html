@@ -1,0 +1,512 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Gen AI Analytics Dashboard</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+  <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+  <script src="https://unpkg.com/redux@4.2.1/dist/redux.min.js"></script>
+  <script src="https://unpkg.com/react-redux@8.1.3/dist/react-redux.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.2/dist/chart.umd.min.js"></script>
+  <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+  <script src="https://unpkg.com/prop-types@15.8.1/prop-types.min.js"></script>
+  <style>
+    @keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
+    @keyframes slideIn { from { transform: translateY(10px); opacity: 0; } to { transform: translateY(0); opacity: 1; } }
+    .fade-in { animation: fadeIn 0.5s ease-in; }
+    .slide-in { animation: slideIn 0.3s ease-out; }
+    .hover-lift:hover { transform: translateY(-2px); transition: transform 0.2s; }
+    .accordion-content { transition: max-height 0.3s ease-out; overflow: hidden; }
+    .theme-transition { transition: background-color 0.3s ease, color 0.3s ease, border-color 0.3s ease; }
+  </style>
+</head>
+<body class="min-h-screen font-sans theme-transition">
+  <div id="root"></div>
+
+  <script type="text/babel">
+    const { createStore } = Redux;
+    const { Provider, connect } = ReactRedux;
+
+    // Register Chart.js background color plugin
+    Chart.register({
+      id: 'customCanvasBackgroundColor',
+      beforeDraw: (chart, args, options) => {
+        const { ctx } = chart;
+        ctx.save();
+        ctx.globalCompositeOperation = 'destination-over';
+        ctx.fillStyle = options.color || '#fff';
+        ctx.fillRect(0, 0, chart.width, chart.height);
+        ctx.restore();
+      }
+    });
+
+    // Redux Actions
+    const SUBMIT_QUERY = 'SUBMIT_QUERY';
+    const SET_RESULT = 'SET_RESULT';
+    const SET_ERROR = 'SET_ERROR';
+    const ADD_TO_HISTORY = 'ADD_TO_HISTORY';
+    const SET_CHART_TYPE = 'SET_CHART_TYPE';
+    const TOGGLE_THEME = 'TOGGLE_THEME';
+
+    const submitQuery = (query) => ({ type: SUBMIT_QUERY, payload: query });
+    const setResult = (result) => ({ type: SET_RESULT, payload: result });
+    const setError = (error) => ({ type: SET_ERROR, payload: error });
+    const addToHistory = (query) => ({ type: ADD_TO_HISTORY, payload: query });
+    const setChartType = (chartType) => ({ type: SET_CHART_TYPE, payload: chartType });
+    const toggleTheme = () => ({ type: TOGGLE_THEME });
+
+    // Redux Reducer with Local Storage for Query History
+    const initialState = {
+      query: '',
+      status: 'idle',
+      result: null,
+      error: null,
+      history: JSON.parse(localStorage.getItem('queryHistory')) || [],
+      chartType: 'line',
+      theme: 'light'
+    };
+
+    const reducer = (state = initialState, action) => {
+      switch (action.type) {
+        case SUBMIT_QUERY:
+          return { ...state, query: action.payload, status: 'loading', result: null, error: null };
+        case SET_RESULT:
+          return { ...state, status: 'success', result: action.payload };
+        case SET_ERROR:
+          return { ...state, status: 'error', error: action.payload };
+        case ADD_TO_HISTORY:
+          const newHistory = state.history.includes(action.payload)
+            ? state.history
+            : [action.payload, ...state.history.slice(0, 4)];
+          localStorage.setItem('queryHistory', JSON.stringify(newHistory));
+          return { ...state, history: newHistory };
+        case SET_CHART_TYPE:
+          return { ...state, chartType: action.payload };
+        case TOGGLE_THEME:
+          return { ...state, theme: state.theme === 'light' ? 'dark' : 'light' };
+        default:
+          return state;
+      }
+    };
+
+    const store = createStore(reducer);
+
+    // Mock AI Query Processing Simulation
+    const mockAIProcess = (query) => {
+      return new Promise((resolve, reject) => {
+        setTimeout(() => {
+          const q = query.toLowerCase();
+          if (q.trim() === '') {
+            reject('Query cannot be empty');
+          } else if (q.includes('sales')) {
+            resolve({
+              type: 'bar',
+              labels: ['North', 'South', 'East', 'West'],
+              data: [120, 190, 300, 250]
+            });
+          } else if (q.includes('revenue')) {
+            const dailyData = [];
+            const fullLabels = [];
+            let baseValue = 50;
+            for (let i = 0; i < 120; i++) {
+              baseValue += (Math.random() - 0.5) * 10;
+              dailyData.push(Math.max(0, baseValue));
+              fullLabels.push(`Day ${i + 1}`);
+            }
+            resolve({
+              type: 'line',
+              labels: fullLabels,
+              displayLabels: ['Jan', 'Feb', 'Mar', 'Apr'],
+              data: dailyData
+            });
+          } else if (q.includes('profit')) {
+            const monthlyData = [150, 200, 180, 220];
+            resolve({
+              type: 'bar',
+              labels: ['Q1', 'Q2', 'Q3', 'Q4'],
+              data: monthlyData
+            });
+          } else {
+            reject('No data found for this query');
+          }
+        }, 1000);
+      });
+    };
+
+    // Query Input Component with Natural Language and Suggestions
+    const QueryInput = ({ dispatch, status, history }) => {
+      QueryInput.propTypes = {
+        dispatch: PropTypes.func.isRequired,
+        status: PropTypes.string.isRequired,
+        history: PropTypes.arrayOf(PropTypes.string).isRequired
+      };
+
+      const [input, setInput] = React.useState('');
+      const baseSuggestions = ['Show sales by region', 'Revenue this year', 'Profit trends by quarter'];
+      const [suggestions, setSuggestions] = React.useState(baseSuggestions);
+
+      const handleInputChange = (e) => {
+        const value = e.target.value;
+        setInput(value);
+        if (value.trim() === '') {
+          setSuggestions(baseSuggestions);
+        } else {
+          const filtered = baseSuggestions.filter(s => s.toLowerCase().includes(value.toLowerCase()));
+          setSuggestions(filtered.length > 0 ? filtered : ['No matching suggestions']);
+        }
+      };
+
+      const handleSubmit = (e) => {
+        e.preventDefault();
+        if (!input) return;
+        dispatch(submitQuery(input));
+        dispatch(addToHistory(input));
+        mockAIProcess(input)
+          .then((result) => dispatch(setResult(result)))
+          .catch((error) => dispatch(setError(error)));
+        setInput('');
+        setSuggestions(baseSuggestions);
+      };
+
+      return (
+        <section className="p-6 bg-gradient-to-br from-blue-100 to-blue-200 dark:from-gray-800 dark:to-gray-700 rounded-xl shadow-lg theme-transition">
+          <form onSubmit={handleSubmit}>
+            <div className="relative">
+              <input
+                type="text"
+                value={input}
+                onChange={handleInputChange}
+                placeholder="Ask a question (e.g., Show sales by region)"
+                className="w-full p-4 bg-white dark:bg-gray-900 text-gray-900 dark:text-white border border-blue-300 dark:border-gray-600 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 dark:focus:ring-blue-400 transition-all theme-transition"
+                aria-label="Enter your query here"
+              />
+              <span className="absolute right-3 top-1/2 transform -translate-y-1/2 text-blue-600 dark:text-blue-400 font-semibold theme-transition">AI</span>
+            </div>
+            {status === 'idle' && history.length === 0 && (
+              <p className="text-sm text-gray-600 dark:text-gray-400 mt-2 theme-transition">Ask a question to see insights</p>
+            )}
+            <div className="mt-3 flex flex-wrap gap-2">
+              {suggestions.map((s, i) => (
+                <button
+                  key={i}
+                  type="button"
+                  onClick={() => setInput(s)}
+                  className="text-sm bg-gradient-to-r from-purple-500 to-purple-600 dark:from-purple-600 dark:to-purple-700 text-white py-1 px-3 rounded-full hover:from-purple-600 hover:to-purple-700 dark:hover:from-purple-700 dark:hover:to-purple-800 hover-lift transition-all theme-transition"
+                  aria-label={`Suggestion: ${s}`}
+                >
+                  {s}
+                </button>
+              ))}
+            </div>
+            <button
+              type="submit"
+              className="mt-4 w-full bg-gradient-to-r from-green-500 to-green-600 dark:from-green-600 dark:to-green-700 text-white p-3 rounded-lg hover:from-green-600 hover:to-green-700 dark:hover:from-green-700 dark:hover:to-green-800 hover-lift transition-all font-semibold theme-transition"
+            >
+              Analyze Now
+            </button>
+          </form>
+        </section>
+      );
+    };
+
+    // Query History Component
+    const QueryHistory = ({ history, dispatch }) => {
+      QueryHistory.propTypes = {
+        history: PropTypes.arrayOf(PropTypes.string).isRequired,
+        dispatch: PropTypes.func.isRequired
+      };
+
+      const [isOpen, setIsOpen] = React.useState(false);
+
+      const handleQueryClick = (query) => {
+        dispatch(submitQuery(query));
+        mockAIProcess(query)
+          .then((result) => dispatch(setResult(result)))
+          .catch((error) => dispatch(setError(error)));
+      };
+
+      return (
+        <section className="mt-4">
+          <button
+            onClick={() => setIsOpen(!isOpen)}
+            className="w-full p-4 bg-gradient-to-br from-orange-100 to-orange-200 dark:from-gray-700 dark:to-gray-600 rounded-xl shadow-lg text-left text-xl font-semibold text-orange-800 dark:text-orange-300 hover:from-orange-200 hover:to-orange-300 dark:hover:from-gray-600 dark:hover:to-gray-500 transition-all flex justify-between items-center theme-transition"
+            aria-expanded={isOpen}
+            aria-controls="query-history-content"
+          >
+            Query History
+            <svg
+              className={`w-5 h-5 transform transition-transform ${isOpen ? 'rotate-180' : ''} text-orange-800 dark:text-orange-300 theme-transition`}
+              fill="none"
+              stroke="currentColor"
+              viewBox="0 0 24 24"
+            >
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19 9l-7 7-7-7" />
+            </svg>
+          </button>
+          <div
+            id="query-history-content"
+            className="accordion-content"
+            style={{ maxHeight: isOpen ? '300px' : '0' }}
+          >
+            <div className="p-6 bg-gradient-to-br from-orange-100 to-orange-200 dark:from-gray-700 dark:to-gray-600 rounded-b-xl shadow-lg fade-in theme-transition">
+              {history.length === 0 ? (
+                <p className="text-sm text-gray-600 dark:text-gray-400 theme-transition">No queries yet—start asking!</p>
+              ) : (
+                <ul className="space-y-2">
+                  {history.map((q, i) => (
+                    <li
+                      key={i}
+                      onClick={() => handleQueryClick(q)}
+                      onKeyDown={(e) => e.key === 'Enter' && handleQueryClick(q)}
+                      className="cursor-pointer text-sm text-gray-900 dark:text-white bg-gradient-to-r from-orange-200 to-orange-300 dark:from-gray-600 dark:to-gray-500 p-2 rounded-lg hover:from-orange-300 hover:to-orange-400 dark:hover:from-gray-500 dark:hover:to-gray-400 transition-all focus:outline-none focus:ring-2 focus:ring-orange-500 theme-transition"
+                      tabIndex="0"
+                      role="button"
+                      aria-label={`Re-run query: ${q}`}
+                    >
+                      {q}
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </div>
+          </div>
+        </section>
+      );
+    };
+
+    // Result Display Component with Charts and Loading/Error States
+    const ResultDisplay = ({ status, result, error, chartType, dispatch, theme }) => {
+      ResultDisplay.propTypes = {
+        status: PropTypes.string.isRequired,
+        result: PropTypes.object,
+        error: PropTypes.string,
+        chartType: PropTypes.string.isRequired,
+        dispatch: PropTypes.func.isRequired,
+        theme: PropTypes.string.isRequired
+      };
+
+      const chartRef = React.useRef(null);
+      const chartInstance = React.useRef(null);
+      const [isChartAnimating, setIsChartAnimating] = React.useState(false);
+
+      React.useEffect(() => {
+        if (status === 'success' && result && chartRef.current) {
+          if (chartInstance.current) chartInstance.current.destroy();
+          const ctx = chartRef.current.getContext('2d');
+          const isLineChart = chartType === 'line' || chartType === 'area';
+          const textColor = theme === 'light' ? '#000' : '#fff'; // Black in light mode, white in dark mode
+          const gridColor = theme === 'light' ? 'rgba(0, 0, 0, 0.1)' : 'rgba(255, 255, 255, 0.2)';
+          const backgroundColor = theme === 'light' ? '#fff' : '#333'; // White background in light mode, dark in dark mode
+
+          chartInstance.current = new Chart(ctx, {
+            type: chartType === 'area' ? 'line' : chartType,
+            data: {
+              labels: result.type === 'line' ? result.labels : result.labels,
+              datasets: [{
+                label: result.type === 'bar' ? (result.labels[0] === 'North' ? 'Sales' : 'Profit') : 'Revenue',
+                data: result.data,
+                backgroundColor: result.type === 'bar' ? 'rgba(59, 130, 246, 0.8)' : 'rgba(236, 72, 153, 0.6)',
+                borderColor: result.type === 'bar' ? 'rgba(59, 130, 246, 1)' : 'rgba(236, 72, 153, 1)',
+                borderWidth: isLineChart ? 2 : 1,
+                pointRadius: isLineChart ? 0 : undefined,
+                fill: chartType === 'area',
+                tension: 0.4
+              }]
+            },
+            options: {
+              responsive: true,
+              maintainAspectRatio: false,
+              layout: {
+                padding: 10
+              },
+              plugins: {
+                customCanvasBackgroundColor: {
+                  color: backgroundColor // Set chart background dynamically
+                },
+                legend: { 
+                  labels: { 
+                    color: textColor,
+                    font: { size: 12 }
+                  } 
+                },
+                tooltip: {
+                  enabled: true,
+                  mode: isLineChart ? 'index' : 'nearest',
+                  intersect: false,
+                  position: 'nearest',
+                  backgroundColor: 'rgba(0, 0, 0, 0.8)',
+                  titleColor: '#fff',
+                  bodyColor: '#fff',
+                  padding: 10,
+                  borderWidth: 2,
+                  cornerRadius: 6,
+                  callbacks: {
+                    label: (context) => {
+                      const value = context.raw;
+                      const prevValue = context.dataIndex > 0 ? context.dataset.data[context.dataIndex - 1] : null;
+                      const change = prevValue !== null ? ((value - prevValue) / prevValue * 100).toFixed(1) : null;
+                      return change ? `${context.dataset.label}: ${value.toFixed(2)} (${change}%)` : `${context.dataset.label}: ${value.toFixed(2)}`;
+                    },
+                    title: (tooltipItems) => tooltipItems[0].label
+                  }
+                }
+              },
+              scales: {
+                y: { 
+                  beginAtZero: true, 
+                  grid: { 
+                    color: gridColor,
+                    borderColor: gridColor
+                  }, 
+                  ticks: { 
+                    color: textColor,
+                    font: { size: 12 }
+                  },
+                  title: {
+                    display: true,
+                    text: result.type === 'bar' ? (result.labels[0] === 'North' ? 'Sales' : 'Profit') : 'Revenue',
+                    color: textColor
+                  }
+                },
+                x: { 
+                  grid: { 
+                    display: false,
+                    borderColor: gridColor
+                  }, 
+                  ticks: { 
+                    color: textColor,
+                    font: { size: 12 },
+                    callback: function(value, index, values) {
+                      if (result.type === 'line') {
+                        const monthLabels = result.displayLabels || ['Jan', 'Feb', 'Mar', 'Apr'];
+                        if (index === 0) return monthLabels[0];
+                        if (index === 29) return monthLabels[1];
+                        if (index === 59) return monthLabels[2];
+                        if (index === 89) return monthLabels[3];
+                        return null;
+                      }
+                      return result.labels[index];
+                    }
+                  }
+                }
+              }
+            }
+          });
+        }
+        return () => {
+          if (chartInstance.current) chartInstance.current.destroy();
+        };
+      }, [status, result, chartType, theme]); // Ensure theme is in dependencies
+
+      const handleChartTypeChange = (type) => {
+        setIsChartAnimating(true);
+        setTimeout(() => {
+          dispatch(setChartType(type));
+          setIsChartAnimating(false);
+        }, 300);
+      };
+
+      if (status === 'idle') return null;
+
+      return (
+        <section className="p-6 bg-gradient-to-br from-purple-100 to-purple-200 dark:from-gray-800 dark:to-gray-700 rounded-xl shadow-lg fade-in theme-transition" role="region" aria-live="polite">
+          {status === 'loading' && (
+            <div className="text-center">
+              <svg className="animate-spin h-8 w-8 text-purple-600 dark:text-purple-400 mx-auto theme-transition" viewBox="0 0 24 24">
+                <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" fill="none" />
+                <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8h8a8 8 0 11-16 0z" />
+              </svg>
+              <p className="text-gray-600 dark:text-gray-400 mt-2 theme-transition">Analyzing...</p>
+            </div>
+          )}
+          {status === 'error' && (
+            <p className="text-red-500 dark:text-red-400 text-center theme-transition">{error || 'Something went wrong'}</p>
+          )}
+          {status === 'success' && result && (
+            <>
+              <div className="flex justify-center mb-4 space-x-2">
+                {['line', 'bar', 'area'].map(type => (
+                  <button
+                    key={type}
+                    onClick={() => handleChartTypeChange(type)}
+                    className={`px-3 py-1 rounded-full text-sm font-semibold ${chartType === type ? 'bg-gradient-to-r from-blue-500 to-blue-600 text-white' : 'bg-gray-200 dark:bg-gray-600 text-gray-900 dark:text-white'} hover-lift transition-all theme-transition`}
+                  >
+                    {type.charAt(0).toUpperCase() + type.slice(1)}
+                  </button>
+                ))}
+              </div>
+              <div className={`h-72 relative ${isChartAnimating ? 'slide-in' : ''}`}>
+                <canvas ref={chartRef} aria-label="Query result chart"></canvas>
+              </div>
+            </>
+          )}
+        </section>
+      );
+    };
+
+    // Main App Component
+    const App = ({ status, result, error, history, chartType, theme, dispatch }) => {
+      App.propTypes = {
+        status: PropTypes.string.isRequired,
+        result: PropTypes.object,
+        error: PropTypes.string,
+        history: PropTypes.arrayOf(PropTypes.string).isRequired,
+        chartType: PropTypes.string.isRequired,
+        theme: PropTypes.string.isRequired,
+        dispatch: PropTypes.func.isRequired
+      };
+
+      React.useEffect(() => {
+        document.body.className = `min-h-screen font-sans theme-transition ${theme === 'light' ? 'bg-white text-gray-900' : 'bg-gray-900 text-white'}`;
+      }, [theme]);
+
+      return (
+        <div className="relative">
+          <button
+            onClick={() => dispatch(toggleTheme())}
+            className="fixed top-4 right-4 p-2 bg-gradient-to-r from-gray-200 to-gray-300 dark:from-gray-700 dark:to-gray-600 rounded-full hover-lift transition-all theme-transition z-10"
+            aria-label={`Switch to ${theme === 'light' ? 'dark' : 'light'} mode`}
+          >
+            {theme === 'light' ? '🌙' : '☀️'}
+          </button>
+          <div className="max-w-5xl mx-auto my-10">
+            <header className="mb-8">
+              <h1 className="text-3xl font-bold bg-gradient-to-r from-blue-600 to-purple-600 text-transparent bg-clip-text">
+                Gen AI Analytics Dashboard
+              </h1>
+            </header>
+            <main className="grid grid-cols-1 md:grid-cols-2 gap-6">
+              <div>
+                <QueryInput dispatch={dispatch} status={status} history={history} />
+                <QueryHistory history={history} dispatch={dispatch} />
+              </div>
+              <ResultDisplay status={status} result={result} error={error} chartType={chartType} dispatch={dispatch} theme={theme} />
+            </main>
+          </div>
+        </div>
+      );
+    };
+
+    const mapStateToProps = (state) => ({
+      status: state.status,
+      result: state.result,
+      error: state.error,
+      history: state.history,
+      chartType: state.chartType,
+      theme: state.theme
+    });
+
+    const ConnectedApp = connect(mapStateToProps)(App);
+
+    // Render the App
+    const root = ReactDOM.createRoot(document.getElementById('root'));
+    root.render(
+      <Provider store={store}>
+        <ConnectedApp />
+      </Provider>
+    );
+  </script>
+</body>
+</html>
